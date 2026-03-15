@@ -1,0 +1,43 @@
+{
+  "name": "hellojohn-oss",
+  "version": "0.1.12",
+  "description": "HelloJohn OSS installer — one command to download, install, and run your local auth server",
+  "keywords": [
+    "hellojohn",
+    "auth",
+    "identity",
+    "iam",
+    "oidc",
+    "oauth2",
+    "self-hosted",
+    "installer"
+  ],
+  "homepage": "https://github.com/HelloJohn-OSS/hellojohn",
+  "bugs": {
+    "url": "https://github.com/HelloJohn-OSS/hellojohn/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HelloJohn-OSS/hellojohn.git",
+    "directory": "npm-installer"
+  },
+  "license": "MIT",
+  "main": "src/index.js",
+  "bin": {
+    "hellojohn-oss": "bin/hellojohn-oss.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "test": "node --test src/**/*.test.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/",
+    "README.md"
+  ],
+  "dependencies": {}
+}
