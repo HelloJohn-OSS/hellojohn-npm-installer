@@ -174,7 +174,7 @@ function extractTarGz(archivePath, destDir, targetBinary) {
       const found = findFileRecursive(tmpExtract, targetBinary);
       if (found) {
         fs.mkdirSync(destDir, { recursive: true });
-        fs.copyFileSync(found, path.join(destDir, targetBinary));
+        safeCopyBinary(found, path.join(destDir, targetBinary));
       }
       try { fs.rmSync(tmpExtract, { recursive: true, force: true }); } catch {}
       resolve();
@@ -242,7 +242,7 @@ function extractZip(archivePath, destDir, targetBinary) {
         const found = findFileRecursive(tmpExtract, targetBinary);
         if (found) {
           fs.mkdirSync(destDir, { recursive: true });
-          fs.copyFileSync(found, path.join(destDir, targetBinary));
+          safeCopyBinary(found, path.join(destDir, targetBinary));
         }
         // Cleanup temp extraction dir (best effort)
         try { fs.rmSync(tmpExtract, { recursive: true, force: true }); } catch {}
@@ -260,7 +260,7 @@ function extractZip(archivePath, destDir, targetBinary) {
       const found = findFileRecursive(tmpExtract, targetBinary);
       if (found) {
         fs.mkdirSync(destDir, { recursive: true });
-        fs.copyFileSync(found, path.join(destDir, targetBinary));
+        safeCopyBinary(found, path.join(destDir, targetBinary));
       }
       try { fs.rmSync(tmpExtract, { recursive: true, force: true }); } catch {}
       resolve();
@@ -271,6 +271,44 @@ function extractZip(archivePath, destDir, targetBinary) {
       ));
     }
   });
+}
+
+/**
+ * Copies `src` to `dest`, using a rename-based swap on Windows to handle the
+ * case where `dest` is a running executable (EBUSY / ERROR_ACCESS_DENIED).
+ *
+ * On Windows, you cannot overwrite a running .exe, but you CAN rename it to
+ * a temporary name — the process keeps its open file handle and continues
+ * running from the renamed file. The new binary is then placed at `dest`.
+ * The `.old` file is cleaned up opportunistically; if it can't be deleted yet
+ * (process still alive) it will be retried on the next install.
+ */
+function safeCopyBinary(src, dest) {
+  // First attempt: direct copy (fast path, works when not running).
+  try {
+    fs.copyFileSync(src, dest);
+    return;
+  } catch (err) {
+    // On Windows, a running exe throws EBUSY or EPERM. Try the rename trick.
+    if (process.platform !== 'win32' || (err.code !== 'EBUSY' && err.code !== 'EPERM')) {
+      throw err;
+    }
+  }
+
+  // Rename old binary out of the way so the destination path is free.
+  const old = dest + '.old';
+  try { fs.renameSync(dest, old); } catch { /* dest may not exist */ }
+
+  try {
+    fs.copyFileSync(src, dest);
+  } catch (copyErr) {
+    // Restore old binary so the user is not left with a broken install.
+    try { fs.renameSync(old, dest); } catch {}
+    throw copyErr;
+  }
+
+  // Best-effort cleanup of the .old file (may still be in use by running process).
+  try { fs.unlinkSync(old); } catch { /* will be cleaned up on next install */ }
 }
 
 function sleep(ms) {

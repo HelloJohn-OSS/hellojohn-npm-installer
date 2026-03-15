@@ -1,6 +1,6 @@
 {
   "name": "hellojohn-oss",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "HelloJohn OSS installer — one command to download, install, and run your local auth server",
   "keywords": [
     "hellojohn",

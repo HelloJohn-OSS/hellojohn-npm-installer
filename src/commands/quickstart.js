@@ -45,6 +45,18 @@ async function runQuickstart(opts = {}) {
 
   const hjctl = path.join(binDir(), 'hjctl' + platform.exeSuffix);
 
+  // ── Pre-step: Stop running server before installing ───────────────────────
+  // On Windows, running executables are locked — fs.copyFileSync throws EBUSY
+  // when trying to overwrite hellojohn.exe while the server is running.
+  // If hjctl is already installed from a prior run, stop the server gracefully
+  // before setup attempts to overwrite the binary.
+  if (fs.existsSync(hjctl)) {
+    spawnSync(hjctl, ['local', 'stop', '--server-only'], {
+      stdio: 'pipe',
+      env: { ...process.env, PATH: `${binDir()}${path.delimiter}${process.env.PATH}` },
+    });
+  }
+
   // ── Step 1/3: Install ────────────────────────────────────────────────────
   process.stdout.write('\nStep 1/3  Installing HelloJohn OSS...\n');
 
