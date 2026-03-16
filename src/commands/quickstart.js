@@ -216,23 +216,23 @@ function launchReadyTerminal({ binDir: bin, port, profile, boxContent = null }) 
 
   try {
     if (process.platform === 'win32') {
-      // Build PowerShell script lines
+      const tmpPs1 = os.tmpdir() + '\\hellojohn-ready.ps1';
+      const tmpTxt = os.tmpdir() + '\\hellojohn-ready.txt';
+
+      // Build PowerShell script lines (kept ASCII-safe — no Unicode in the .ps1 itself)
       const psLines = [
-        // Ensure Unicode box-drawing chars render correctly
+        // Ensure box-drawing chars render correctly in the console
         `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`,
         `$env:PATH = "${bin};$env:PATH"`,
-        `Write-Host ""`,
       ];
 
       if (boxContent) {
-        // Write the summary box — each line as a Write-Host call.
-        // Using single-quoted strings avoids PowerShell interpreting $ or `.
-        // Single quotes inside the content are escaped by doubling them.
-        for (const line of boxContent.split('\n')) {
-          const escaped = line.replace(/'/g, "''");
-          psLines.push(`Write-Host '${escaped}'`);
-        }
+        // Write the box to a separate UTF-8 text file; Get-Content reads it safely
+        // regardless of the PS1 file's own encoding.
+        fs.writeFileSync(tmpTxt, boxContent, 'utf8');
+        psLines.push(`Get-Content -Encoding UTF8 '${tmpTxt}'`);
       } else {
+        psLines.push(`Write-Host ""`);
         psLines.push(`Write-Host "  HelloJohn OSS is running at http://localhost:${port}" -ForegroundColor Green`);
         psLines.push(`Write-Host "  Profile: ${profile}"`);
         psLines.push(`Write-Host ""`);
@@ -244,9 +244,9 @@ function launchReadyTerminal({ binDir: bin, port, profile, boxContent = null }) 
 
       psLines.push(`hjctl local status`);
 
-      // Write a temp .ps1 file so we don't hit any quoting/length limits
-      const tmpPs1 = os.tmpdir() + '\\hellojohn-ready.ps1';
-      fs.writeFileSync(tmpPs1, psLines.join('\r\n'), 'utf8');
+      // Write the .ps1 as UTF-8 with BOM so PowerShell parses it correctly
+      const BOM = '\ufeff';
+      fs.writeFileSync(tmpPs1, BOM + psLines.join('\r\n'), 'utf8');
 
       // cmd /c start — forces Windows to open a new visible console window
       spawn('cmd.exe', [
