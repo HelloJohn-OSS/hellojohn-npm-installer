@@ -18,27 +18,35 @@ const BOX_WIDTH = 54; // inner content width
  *     '  hjctl local init',
  *   ]);
  */
-function printBox(lines) {
+/**
+ * Renders a bordered box to a string (no ANSI colour codes stripped from content,
+ * but padding is calculated from the raw/stripped length).
+ *
+ * @param {Array<string|null>} lines
+ * @returns {string}
+ */
+function renderBox(lines) {
   const w = BOX_WIDTH;
   const top    = `╔${'═'.repeat(w + 2)}╗`;
   const bottom = `╚${'═'.repeat(w + 2)}╝`;
   const div    = `╠${'═'.repeat(w + 2)}╣`;
 
-  process.stdout.write('\n');
-  process.stdout.write(top + '\n');
-
+  const parts = ['\n', top + '\n'];
   for (const line of lines) {
     if (line === null) {
-      process.stdout.write(div + '\n');
+      parts.push(div + '\n');
     } else {
-      // Strip ANSI codes for length measurement
       const raw = stripAnsi(line);
       const pad = Math.max(0, w - raw.length);
-      process.stdout.write(`║  ${line}${' '.repeat(pad)}  ║\n`);
+      parts.push(`║  ${line}${' '.repeat(pad)}  ║\n`);
     }
   }
+  parts.push(bottom + '\n\n');
+  return parts.join('');
+}
 
-  process.stdout.write(bottom + '\n\n');
+function printBox(lines) {
+  process.stdout.write(renderBox(lines));
 }
 
 /**
@@ -54,4 +62,4 @@ function stripAnsi(str) {
   return str.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
-module.exports = { printBox, printNextSteps, BOX_WIDTH };
+module.exports = { printBox, renderBox, printNextSteps, BOX_WIDTH };

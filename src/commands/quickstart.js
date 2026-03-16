@@ -20,7 +20,7 @@ const fs   = require('fs');
 const os   = require('os');
 
 const { runSetup }  = require('./setup');
-const { printBox }  = require('../ui/box');
+const { printBox, renderBox } = require('../ui/box');
 const { tick, yellow, bold, dim, green } = require('../ui/colors');
 const { binDir }    = require('../lib/install-dir');
 const { detect }    = require('../lib/platform');
@@ -154,6 +154,10 @@ async function runQuickstart(opts = {}) {
     if (connectResult.status !== 0) {
       process.stdout.write(`  ${yellow('⚠')}  Could not connect tunnel. Run: hjctl local connect --token hjtun_...\n`);
     }
+
+    // Launch a ready terminal without a summary box (tunnel status was already shown above)
+    launchReadyTerminal({ binDir: binDir(), port: resolvedPort, profile, boxContent: null });
+
   } else {
     const boxLines = [
       `${tick()}  HelloJohn OSS is running`,
@@ -174,7 +178,7 @@ async function runQuickstart(opts = {}) {
       boxLines.push(`Admin login:`);
       boxLines.push(`  Email:    ${creds.email}`);
       boxLines.push(`  Password: ${creds.password}`);
-      boxLines.push(`  Run: hjctl auth login`);
+      boxLines.push(`  hjctl auth login --email ${creds.email} --password ${creds.password}`);
     }
 
     boxLines.push(null);
@@ -183,41 +187,66 @@ async function runQuickstart(opts = {}) {
     boxLines.push(`  hjctl local connect --token hjtun_...`);
     boxLines.push(`Get a token from: cloud.hellojohn.com`);
 
-    printBox(boxLines);
+    // ── Send the summary box to the new terminal window, not this console ─────
+    // launchReadyTerminal opens a new shell that already has hjctl in PATH.
+    // Showing the box there means the user only needs to look at one window.
+    // This console exits cleanly after setup completes.
+    const boxContent = renderBox(boxLines);
+    launchReadyTerminal({ binDir: binDir(), port: resolvedPort, profile, boxContent });
+    process.stdout.write(`\n  ${tick()} Setup complete — see the HelloJohn terminal window.\n\n`);
   }
-
-  // ── Open a new terminal with PATH pre-loaded ─────────────────────────────
-  // The user can run hjctl immediately without restarting their shell.
-  launchReadyTerminal({ binDir: binDir(), port: resolvedPort, profile });
 }
 
 /**
  * Launches a new terminal window with ~/.hellojohn/bin in PATH.
  * The user lands in a shell where hjctl is immediately available.
+ *
+ * @param {object} opts
+ * @param {string} opts.binDir   - Path to the hellojohn bin directory
+ * @param {number} opts.port     - Resolved server port
+ * @param {string} opts.profile  - Active profile name
+ * @param {string|null} opts.boxContent - Pre-rendered summary box to display (null = skip)
+ *
  * Silent on any error — not critical if the terminal can't be opened.
  */
-function launchReadyTerminal({ binDir: bin, port, profile }) {
+function launchReadyTerminal({ binDir: bin, port, profile, boxContent = null }) {
   const { spawn } = require('child_process');
+  const os = require('os');
+  const fs = require('fs');
 
   try {
     if (process.platform === 'win32') {
-      // PowerShell welcome script: set PATH, show status, print hint
-      // Use an array joined with newlines — more robust than semicolons for multi-statement scripts
+      // Build PowerShell script lines
       const psLines = [
+        // Ensure Unicode box-drawing chars render correctly
+        `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`,
         `$env:PATH = "${bin};$env:PATH"`,
         `Write-Host ""`,
-        `Write-Host "  HelloJohn OSS is running at http://localhost:${port}" -ForegroundColor Green`,
-        `Write-Host "  Profile: ${profile}"`,
-        `Write-Host ""`,
-        `Write-Host "  hjctl local status      -- check server status"`,
-        `Write-Host "  hjctl local logs        -- view server logs"`,
-        `Write-Host "  hjctl local stop        -- stop the server"`,
-        `Write-Host ""`,
-        `hjctl local status`,
       ];
+
+      if (boxContent) {
+        // Write the summary box — each line as a Write-Host call.
+        // Using single-quoted strings avoids PowerShell interpreting $ or `.
+        // Single quotes inside the content are escaped by doubling them.
+        for (const line of boxContent.split('\n')) {
+          const escaped = line.replace(/'/g, "''");
+          psLines.push(`Write-Host '${escaped}'`);
+        }
+      } else {
+        psLines.push(`Write-Host "  HelloJohn OSS is running at http://localhost:${port}" -ForegroundColor Green`);
+        psLines.push(`Write-Host "  Profile: ${profile}"`);
+        psLines.push(`Write-Host ""`);
+        psLines.push(`Write-Host "  hjctl local status      -- check server status"`);
+        psLines.push(`Write-Host "  hjctl local logs        -- view server logs"`);
+        psLines.push(`Write-Host "  hjctl local stop        -- stop the server"`);
+        psLines.push(`Write-Host ""`);
+      }
+
+      psLines.push(`hjctl local status`);
+
       // Write a temp .ps1 file so we don't hit any quoting/length limits
-      const tmpPs1 = require('os').tmpdir() + '\\hellojohn-ready.ps1';
-      require('fs').writeFileSync(tmpPs1, psLines.join('\r\n'), 'utf8');
+      const tmpPs1 = os.tmpdir() + '\\hellojohn-ready.ps1';
+      fs.writeFileSync(tmpPs1, psLines.join('\r\n'), 'utf8');
 
       // cmd /c start — forces Windows to open a new visible console window
       spawn('cmd.exe', [
@@ -227,14 +256,34 @@ function launchReadyTerminal({ binDir: bin, port, profile }) {
 
     } else if (process.platform === 'darwin') {
       // macOS: open new Terminal tab
-      const script = `export PATH="${bin}:$PATH"; echo "\\nHelloJohn OSS running at http://localhost:${port}\\n"; hjctl local status`;
+      // Write box to a temp file and cat it so special chars don't need escaping
+      let scriptParts = [`export PATH="${bin}:$PATH"`];
+      if (boxContent) {
+        const tmpTxt = os.tmpdir() + '/hellojohn-ready.txt';
+        fs.writeFileSync(tmpTxt, boxContent, 'utf8');
+        scriptParts.push(`cat '${tmpTxt}'`);
+      } else {
+        scriptParts.push(`echo "\\nHelloJohn OSS running at http://localhost:${port}\\n"`);
+      }
+      scriptParts.push(`hjctl local status`);
+      const script = scriptParts.join('; ');
       spawn('osascript', [
         '-e', `tell app "Terminal" to do script "${script.replace(/"/g, '\\"')}"`,
       ], { detached: true, stdio: 'ignore' }).unref();
 
     } else {
       // Linux: try common terminal emulators in order
-      const cmd = `export PATH="${bin}:$PATH"; echo "HelloJohn OSS running at http://localhost:${port}"; hjctl local status; exec bash`;
+      let cmdParts = [`export PATH="${bin}:$PATH"`];
+      if (boxContent) {
+        const tmpTxt = os.tmpdir() + '/hellojohn-ready.txt';
+        fs.writeFileSync(tmpTxt, boxContent, 'utf8');
+        cmdParts.push(`cat '${tmpTxt}'`);
+      } else {
+        cmdParts.push(`echo "HelloJohn OSS running at http://localhost:${port}"`);
+      }
+      cmdParts.push(`hjctl local status`);
+      cmdParts.push(`exec bash`);
+      const cmd = cmdParts.join('; ');
       for (const term of ['gnome-terminal', 'xterm', 'konsole', 'xfce4-terminal']) {
         try {
           const args = term === 'gnome-terminal'
